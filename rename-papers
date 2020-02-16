@@ -5,7 +5,6 @@ from string import punctuation
 from subprocess import Popen, PIPE
 from os import rename
 from pathlib import Path
-import nltk
 
 
 def usage():
@@ -59,13 +58,6 @@ def interactive_renaming(name):
     p2.stdout.close()
     output, err = p3.communicate()
     return format_name(output.decode('utf8'))
-
-
-def guess_name(name):
-    p1 = Popen(['pdftotext', name, '-'], stdout=PIPE)
-    p2 = Popen(['head'], stdin=p1.stdout, stdout=PIPE)
-    output, err = p2.communicate()
-    print(nltk.pos_tag(output.decode('utf8').split()))
 
 
 def main():
