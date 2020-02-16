@@ -1,0 +1,185 @@
+#!/usr/bin/env python3
+
+from bibtexparser import load
+
+from sys import argv, stderr
+from subprocess import PIPE, Popen
+
+from argparse import ArgumentParser
+from graphviz import Digraph
+
+
+def logging(*args, **kwargs):
+    print("[*]", *args, file=stderr, **kwargs)
+
+
+def pdf2text(pdf_file):
+    """ Returns text from pdf_file as a utf-8 string. """
+    p = Popen(['pdftotext', pdf_file, '-'], stdout=PIPE)
+    output, err = p.communicate()
+    if p.returncode != 0:
+        print('error in pdftotext', p.returncode)
+        exit(1)
+    return output.decode('utf8')
+
+
+class Paper:
+    @staticmethod
+    def __sanitize(string):
+        return ''.join([c for c in string if c.isalnum()])
+
+
+    @staticmethod
+    def __simplify_title(title):
+        # take the part of the title that has the most words
+        title = title.split(':')
+        title = max(title, key=lambda t : len(t.split()))
+    
+        title = Paper.__sanitize(title)
+        title = title.lower()
+        return title
+
+
+    @staticmethod
+    def __debrace(title):
+        if title.startswith('{'):
+            return title[1:-1]
+        return title
+    
+
+    @staticmethod
+    def __parse_file_field(field):
+        return '/' + field.split(':')[1].replace('{\\_}', '_')
+
+
+    def __init__(self, id_, title, path):
+        self.title = Paper.__debrace(title)
+        self.__simple_title = Paper.__simplify_title(self.title)
+        self.path = Paper.__parse_file_field(path)
+        self.id = id_
+        self.content = Paper.__sanitize(pdf2text(self.path).lower())
+
+
+    def cites(self, paper):
+        return paper.__simple_title in self.content
+
+
+def dfs_sort(graph, start):
+    """ Performs topological sorting and DFS at once. """
+    sorting, covered = [], set()
+
+    def dfs(node):
+        covered.add(node)
+        for n in graph[node]:
+            if n not in covered:
+                dfs(n)
+    
+        sorting.append(node)
+
+    dfs(start)
+
+    return covered, list(reversed(sorting))
+
+
+def find_shortcuts(graph, start):
+    """ Finds all shortcuts of length 1. """
+    shortcuts = set()
+
+    _, sorting = dfs_sort(graph, start)
+
+    def find_shortcuts_impl(nodes):
+        # create subgraph
+        _, nodes = dfs_sort(graph, nodes[0])
+
+        path_lengths = { n : -1 for n in nodes }
+        src, length = nodes[0], 0
+        for node in nodes:
+            length += 1
+            for dst in graph[node]:
+                if path_lengths[dst] == -1:
+                    path_lengths[dst] = length
+                elif length < path_lengths[dst]:
+                    path_lengths[dst] = length
+                    if length == 1:
+                        shortcuts.add((src, dst))
+                elif length > path_lengths[dst]:
+                    if path_lengths[dst] == 1:
+                        shortcuts.add((src, dst))
+
+    for i in range(len(sorting)):
+        find_shortcuts_impl(sorting[i:])
+
+    return shortcuts
+
+
+def create_connected_graph(nodes, edges):
+    """ Returns a connected graph as an adjacency list. """
+    graph = { n : [] for n in nodes }
+    for src, dst in edges:
+        graph[src].append(dst)
+
+    # add an additional node connecting subgraphs
+    starters = { src for src, _ in edges } - { dst for _, dst in edges }
+    start = '__START__'
+    graph[start] = starters
+
+    return graph, start
+
+
+def create_citation_graph(bib):
+    """ Returns nodes and edges forming the citation graph of the supplied
+    bibliography. """
+
+    logging("Collecting papers...")
+    papers = [ Paper(k, v['title'], v['file']) for k, v in bib.items() ]
+    logging("Done!")
+
+    nodes = { p.id for p in papers }
+    edges = set()
+
+    logging("Creating citation graph...")
+    for query in papers:
+        for paper in papers:
+            if query.title == paper.title:
+                continue
+
+            if paper.cites(query):
+                edges.add((paper.id, query.id))
+
+    logging("Done!")
+    return nodes, edges
+
+
+def main():
+    parser = ArgumentParser(description=\
+            'Creates citation graph from a bibtex file.\n'\
+            'Prints the graph to stdout as a dot file')
+    parser.add_argument('file', metavar='.bib-file', type=str,
+                        help='the bibliography the graph gets created from')
+    parser.add_argument('--trim', action='store_true',
+                        help='remove shortcuts of length one')
+    args = parser.parse_args()
+
+    with open(args.file) as bibtexfile:
+        bib = load(bibtexfile).entries_dict
+
+    nodes, edges = create_citation_graph(bib)
+    graph, start = create_connected_graph(nodes, edges)
+
+    visited, _ = dfs_sort(graph, start)
+    if nodes - visited:
+        logging("Warning:", nodes - visited, "have not been considered!")
+        logging("        ", "Check the titles within the .bib file.")
+
+    if args.trim:
+        shortcuts = find_shortcuts(graph, start)
+        edges -= shortcuts
+
+    dot_graph = Digraph('G')
+    dot_graph.edges(edges)
+    print(dot_graph.source)
+
+
+if __name__ == '__main__':
+    main()
+

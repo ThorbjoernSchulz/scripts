@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+from sys import argv
+from sys import stderr
+from string import punctuation
+from subprocess import Popen, PIPE
+from os import rename
+from pathlib import Path
+import nltk
+
+
+def usage():
+    print('Usage:', argv[0], 'file1 file2 ...', file=stderr)
+
+
+def error(*args):
+    print('Error:', *args, file=stderr)
+
+
+def format_name(name):
+    for c in punctuation:
+        name = name.replace(c, '')
+    return '-'.join(name.split())
+
+
+def get_paper_name(file_):
+    p = Popen(['pdftitle', file_], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+    output, err = p.communicate()
+
+    if p.returncode != 0:
+        error('pdftitle returned with', p.returncode)
+        return ''
+
+    output = output.decode('utf8')
+
+    if err:
+        print(err)
+        return ''
+
+    if len(output) < 5:
+        error('The resulting title was to short:', output)
+        return ''
+
+    if len(output) > 4 * 80:
+        error('The resulting title was to long:', output)
+        return ''
+
+    return format_name(output)
+
+
+def interactive_renaming(name):
+    """ 
+    executes 'pdftotext FILE - | head | vipe' to let the user choose the 
+    title 
+    """
+    p1 = Popen(['pdftotext', name, '-'], stdout=PIPE)
+    p2 = Popen(['head'], stdin=p1.stdout, stdout=PIPE)
+    p1.stdout.close()
+    p3 = Popen(['vipe'], stdin=p2.stdout, stdout=PIPE, env={'EDITOR' : 'vim'})
+    p2.stdout.close()
+    output, err = p3.communicate()
+    return format_name(output.decode('utf8'))
+
+
+def guess_name(name):
+    p1 = Popen(['pdftotext', name, '-'], stdout=PIPE)
+    p2 = Popen(['head'], stdin=p1.stdout, stdout=PIPE)
+    output, err = p2.communicate()
+    print(nltk.pos_tag(output.decode('utf8').split()))
+
+
+def main():
+    arguments = argv[1:]
+    if not arguments:
+        usage()
+        return
+
+    new_names = {}
+    failed_attempts = []
+
+    for name in arguments:
+        print('* Processing', name + '...')
+        new_name = get_paper_name(name)
+        if not new_name:
+            failed_attempts.append(name)
+            continue
+        new_names[name] = Path(name).parent / (new_name + '.pdf')
+
+    if failed_attempts:
+        print('* For', len(failed_attempts), 'files, no title could be found.') 
+        print('* You can manually use your editor to pick the title yourself.')
+        print('* Just delete the lines that are not the title.')
+        answer = input('* Do you want to start the interactive mode? (y/n)')
+
+        if answer.lower() == 'y':
+            for name in failed_attempts:
+                new_name = interactive_renaming(name)
+                if not new_name:
+                    continue
+    
+                new_names[name] = Path(name).parent / (new_name + '.pdf')
+
+    for name, new_name in new_names.items():
+        print('* Ok, renaming', name, 'to', new_name)
+        rename(name, new_name)
+
+    print('* Done.')
+
+
+if __name__ == '__main__':
+    main()
