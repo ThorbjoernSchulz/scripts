@@ -8,6 +8,8 @@ from subprocess import PIPE, Popen
 from argparse import ArgumentParser
 from graphviz import Digraph
 
+from unidecode import unidecode
+
 
 def logging(*args, **kwargs):
     print("[*]", *args, file=stderr, **kwargs)
@@ -26,7 +28,7 @@ def pdf2text(pdf_file):
 class Paper:
     @staticmethod
     def __sanitize(string):
-        return ''.join([c for c in string if c.isalnum()])
+        return unidecode(''.join([c for c in string if c.isalnum()]))
 
 
     @staticmethod
