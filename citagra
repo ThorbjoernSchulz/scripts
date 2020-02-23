@@ -54,15 +54,18 @@ class Paper:
         return '/' + field.split(':')[1].replace('{\\_}', '_')
 
 
-    def __init__(self, id_, title, path):
+    def __init__(self, id_, title, path, doi):
         self.title = Paper.__debrace(title)
         self.__simple_title = Paper.__simplify_title(self.title)
         self.path = Paper.__parse_file_field(path)
         self.id = id_
         self.content = Paper.__sanitize(pdf2text(self.path).lower())
+        self.doi = Paper.__sanitize(doi) if doi else None
 
 
     def cites(self, paper):
+        if paper.doi and paper.doi in self.content:
+            return True
         return paper.__simple_title in self.content
 
 
@@ -133,7 +136,8 @@ def create_citation_graph(bib):
     bibliography. """
 
     logging("Collecting papers...")
-    papers = [ Paper(k, v['title'], v['file']) for k, v in bib.items() ]
+    papers = [ Paper(k, v['title'], v['file'], v.get('doi')) 
+            for k, v in bib.items() ]
     logging("Done!")
 
     nodes = { p.id for p in papers }
