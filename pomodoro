@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+
+"""
+Polybar integration:
+
+    [module/pomodoro]
+    type = custom/script
+    
+    exec = pomodoro
+    
+    tail = true
+    
+    interval = 1
+    
+    click-left = "kill -USR1 $(pgrep --oldest --parent %pid%)"
+    click-right = "kill $(pgrep --oldest --parent %pid%)"
+
+"""
+
+import signal
+import time
+
+from subprocess import Popen as run
+from sys import stdout as output
+
+
+class Pomodoro:
+    WORK_DURATION = 60 * 25
+    BREAK_DURATION = 60 * 5
+    LONG_BREAK_DURATION = 60 * 20 
+
+    ICONS = { 'work' : '', 'break' : '', }
+    
+
+    def __init__(self, notify):
+        self.start_time = self.WORK_DURATION
+        self.state = 'work'
+        self.timer = self.start_time
+        self.iterations = 0
+        self.notify = notify
+
+
+    def tick(self):
+        self.timer -= 1
+
+        if self.timer <= 0:
+            self.break_() if self.state is 'work' else self.work()
+            self.ring()
+            self.timer = self.start_time
+
+        self.print_time()
+
+
+    def break_(self):
+        if self.iterations is 2:
+            self.iterations = -1
+            self.start_time = self.LONG_BREAK_DURATION
+        else:
+            self.start_time = self.BREAK_DURATION
+
+        self.state = 'break'
+
+
+    def work(self):
+        self.iterations += 1
+        self.start_time = self.WORK_DURATION
+        self.state = 'work'
+
+
+    def ring(self):
+        self.notify()
+
+
+    def print_time(self):
+        minutes, seconds = divmod(self.timer, 60)
+        icon = self.ICONS[self.state]
+        output.write('{} {:02d}:{:02d}\n'.format(icon, minutes, seconds))
+        output.flush()
+
+
+def alarm_handler(pomodoro):
+    def tick(signalnum, stack_frame):
+        pomodoro.tick()
+
+    return tick
+
+
+def toggle_handler():
+    switch = False
+
+    def toggle(signalnum, stack_frame):
+        nonlocal switch
+        if switch:
+            signal.setitimer(signal.ITIMER_REAL, 0, 0)
+        else:
+            signal.setitimer(signal.ITIMER_REAL, 1, 1)
+        switch = not switch
+
+    return toggle
+
+
+def main():
+    pomodoro = Pomodoro(lambda : run('paplay ~/.config/polybar/notif.ogg', shell=True))
+
+    signal.signal(signal.SIGALRM, alarm_handler(pomodoro))
+    signal.signal(signal.SIGUSR1, toggle_handler())
+
+    pomodoro.print_time()
+
+    while True:
+        time.sleep(60)
+
+
+if __name__ == '__main__':
+    main()
+
